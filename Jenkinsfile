@@ -27,12 +27,12 @@ pipeline {
             parallel {
                 stage('Backend deps') {
                     steps {
-                        dir('backend') { sh 'npm ci' }
+                        dir('backend') { sh 'npm install' }
                     }
                 }
                 stage('Frontend deps') {
                     steps {
-                        dir('frontend') { sh 'npm ci' }
+                        dir('frontend') { sh 'npm install' }
                     }
                 }
             }
