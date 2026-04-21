@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    tools {
+        nodejs 'NodeJS-18'
+    }
+
     environment {
         DOCKERHUB_USER = 'ilyeschrif21'
         SONAR_HOST_URL = 'http://sonarqube:9000'
