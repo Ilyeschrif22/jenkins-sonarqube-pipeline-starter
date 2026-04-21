@@ -9,7 +9,6 @@ pipeline {
         DOCKERHUB_USER = 'ilyeschrif21'
         IMAGE_BACKEND  = "${DOCKERHUB_USER}/mern-backend"
         IMAGE_FRONTEND = "${DOCKERHUB_USER}/mern-frontend"
-        DOCKER_CREDS   = credentials('dockerhub')
     }
 
     stages {
@@ -52,17 +51,24 @@ pipeline {
 
         stage('Push Images to DockerHub') {
             steps {
-                sh "echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin"
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
 
-                sh "docker tag mern-frontend ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
-                sh "docker tag mern-frontend ${IMAGE_FRONTEND}:latest"
-                sh "docker tag mern-backend  ${IMAGE_BACKEND}:${BUILD_NUMBER}"
-                sh "docker tag mern-backend  ${IMAGE_BACKEND}:latest"
+                    // docker-compose prefixes images with the folder name: mern-pipeline-
+                    sh "docker tag mern-pipeline-frontend ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
+                    sh "docker tag mern-pipeline-frontend ${IMAGE_FRONTEND}:latest"
+                    sh "docker tag mern-pipeline-backend  ${IMAGE_BACKEND}:${BUILD_NUMBER}"
+                    sh "docker tag mern-pipeline-backend  ${IMAGE_BACKEND}:latest"
 
-                sh "docker push ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
-                sh "docker push ${IMAGE_FRONTEND}:latest"
-                sh "docker push ${IMAGE_BACKEND}:${BUILD_NUMBER}"
-                sh "docker push ${IMAGE_BACKEND}:latest"
+                    sh "docker push ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
+                    sh "docker push ${IMAGE_FRONTEND}:latest"
+                    sh "docker push ${IMAGE_BACKEND}:${BUILD_NUMBER}"
+                    sh "docker push ${IMAGE_BACKEND}:latest"
+                }
             }
         }
 
