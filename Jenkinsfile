@@ -15,8 +15,7 @@ pipeline {
         stage('Clone Repository') {
             steps {
                 git branch: 'main',
-                    credentialsId: 'github-creds',
-                    url: 'https://github.com/Ilyeschrif22/devops-pipeline-starter.git'
+                    url: 'https://github.com/Ilyeschrif22/jenkins-sonarqube-pipeline-starter.git'
             }
         }
 
