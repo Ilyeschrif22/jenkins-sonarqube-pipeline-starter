@@ -7,10 +7,8 @@ pipeline {
 
     environment {
         DOCKERHUB_USER = 'ilyeschrif21'
-        SONAR_HOST_URL = 'http://sonarqube:9000'
         IMAGE_BACKEND  = "${DOCKERHUB_USER}/mern-backend"
         IMAGE_FRONTEND = "${DOCKERHUB_USER}/mern-frontend"
-        SONAR_TOKEN    = credentials('sonar-token')
         DOCKER_CREDS   = credentials('dockerhub')
     }
 
@@ -19,7 +17,7 @@ pipeline {
         stage('Clone Repository') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/Ilyeschrif22/jenkins-sonarqube-pipeline-starter.git'
+                    url: 'https://github.com/Ilyeschrif22/devops-pipeline-starter.git'
             }
         }
 
@@ -40,11 +38,9 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                sh '''
-                    sonar-scanner \
-                      -Dsonar.host.url=${SONAR_HOST_URL} \
-                      -Dsonar.login=${SONAR_TOKEN}
-                '''
+                withSonarQubeEnv('sonarqube') {
+                    sh "${tool 'sonarqube'}/bin/sonar-scanner"
+                }
             }
         }
 
