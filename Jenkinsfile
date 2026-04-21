@@ -1,0 +1,85 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKERHUB_USER = 'ilyeschrif21'
+        SONAR_HOST_URL = 'http://sonarqube:9000'
+        IMAGE_BACKEND  = "${DOCKERHUB_USER}/mern-backend"
+        IMAGE_FRONTEND = "${DOCKERHUB_USER}/mern-frontend"
+        SONAR_TOKEN    = credentials('sonar-token')
+        DOCKER_CREDS   = credentials('dockerhub')
+    }
+
+    stages {
+
+        stage('Clone Repository') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'github-creds',
+                    url: 'https://github.com/Ilyeschrif22/devops-pipeline-starter.git'
+            }
+        }
+
+        stage('Install Dependencies') {
+            parallel {
+                stage('Backend deps') {
+                    steps {
+                        dir('backend') { sh 'npm ci' }
+                    }
+                }
+                stage('Frontend deps') {
+                    steps {
+                        dir('frontend') { sh 'npm ci' }
+                    }
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                sh '''
+                    sonar-scanner \
+                      -Dsonar.host.url=${SONAR_HOST_URL} \
+                      -Dsonar.login=${SONAR_TOKEN}
+                '''
+            }
+        }
+
+        stage('Docker Compose Build') {
+            steps {
+                sh 'docker compose build'
+            }
+        }
+
+        stage('Push Images to DockerHub') {
+            steps {
+                sh "echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin"
+
+                sh "docker tag mern-frontend ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
+                sh "docker tag mern-frontend ${IMAGE_FRONTEND}:latest"
+                sh "docker tag mern-backend  ${IMAGE_BACKEND}:${BUILD_NUMBER}"
+                sh "docker tag mern-backend  ${IMAGE_BACKEND}:latest"
+
+                sh "docker push ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
+                sh "docker push ${IMAGE_FRONTEND}:latest"
+                sh "docker push ${IMAGE_BACKEND}:${BUILD_NUMBER}"
+                sh "docker push ${IMAGE_BACKEND}:latest"
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh 'kubectl apply -f k8s/'
+                sh 'kubectl rollout restart deployment/backend'
+                sh 'kubectl rollout restart deployment/frontend'
+            }
+        }
+
+    }
+
+    post {
+        always  { echo 'Pipeline finished.' }
+        success { echo 'All stages passed. Deployment complete.' }
+        failure { echo 'Pipeline failed — check the stage logs above.' }
+    }
+}
