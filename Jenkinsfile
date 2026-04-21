@@ -17,7 +17,7 @@ pipeline {
         stage('Clone Repository') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/Ilyeschrif22/jenkins-sonarqube-pipeline-starter.git'
+                    url: 'https://github.com/Ilyeschrif22/devops-pipeline-starter.git'
             }
         }
 
@@ -46,7 +46,7 @@ pipeline {
 
         stage('Docker Compose Build') {
             steps {
-                sh 'docker compose build'
+                sh 'docker-compose build'
             }
         }
 
