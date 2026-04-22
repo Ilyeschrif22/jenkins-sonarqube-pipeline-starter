@@ -1,5 +1,17 @@
 # MERN CI/CD Pipeline — Full Setup & Troubleshooting Journal
 
+## Pipeline Results
+
+### Jenkins Build Success
+<img width="1843" alt="Jenkins pipeline passed" src="https://github.com/user-attachments/assets/cda2633a-8386-4a7d-891e-89967d4971e0" />
+
+### Running Containers (Jenkins + SonarQube + Minikube)
+<img width="1343" alt="docker ps showing all containers running" src="https://github.com/user-attachments/assets/429d9f51-7683-4923-8842-d03ef2e765a6" />
+
+### Kubernetes Pods Running
+<img width="982" alt="kubectl get pods" src="https://github.com/user-attachments/assets/b5edbb02-7d13-4364-8a11-102892134c2a" />
+
+
 ## Before Every Build — Startup Checklist
 
 Every time you restart your machine or the containers, run these commands
