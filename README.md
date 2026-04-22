@@ -1,572 +1,577 @@
-# MERN App — DevOps Deployment Pipeline
+# MERN CI/CD Pipeline — Full Setup & Troubleshooting Journal
 
-A full CI/CD pipeline deploying a MERN (MongoDB, Express, React, Node.js) application using : 
-
-**GitHub -> Jenkins -> Docker -> Kubernetes**.
+A real-world walkthrough of every stage, error, and fix encountered while building
+a Jenkins + SonarQube + Docker + Kubernetes pipeline for a MERN app.
 
 ---
 
-## Environment Setup
+## Final Pipeline Flow
 
-Before anything else, make sure Docker is installed on your machine. Then start Jenkins using Docker:
-
-```bash
-docker run -d \
-  --name jenkins \
-  -p 8080:8080 \
-  -p 50000:50000 \
-  -v jenkins_home:/var/jenkins_home \
-  jenkins/jenkins:lts
+```
+GitHub (public repo)
+        |
+        v
+Jenkins (Docker container)
+        |
+   Clone Repository           DONE
+   Install Dependencies       DONE  (parallel: backend + frontend)
+   SonarQube Analysis         DONE
+   Docker Compose Build       DONE
+   Push Images to DockerHub   DONE
+   Deploy to Kubernetes       pending
 ```
 
-Check it is running:
+---
+
+## Environment
+
+| Component         | How it runs                        |
+|-------------------|------------------------------------|
+| Jenkins           | Docker container                   |
+| SonarQube         | Docker container                   |
+| Docker network    | jenkins-net (custom bridge)        |
+| Node.js in Jenkins| NodeJS plugin (auto-installed)     |
+| SonarQube scanner | SonarQube Scanner plugin           |
+| docker-compose    | Installed manually inside Jenkins  |
+
+---
+
+## Stage 1 — Jenkins and SonarQube Setup
+
+### Start containers on a shared network
 
 ```bash
-docker ps
-```
+# Create shared network first
+docker network create jenkins-net
 
-Get the initial admin password:
-
-```bash
-docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
-```
-
-Open **http://localhost:8080** in your browser and paste the password in when prompted. Then install the suggested plugins before proceeding.
-
-### Install Sonarqube 
-
-```bash 
+# Start SonarQube
 docker run -d \
   --name sonarqube \
+  --network jenkins-net \
   -p 9000:9000 \
-  -v $(pwd)/sonar_data:/opt/sonarqube/data \
-  -v $(pwd)/sonar_extensions:/opt/sonarqube/extensions \
-  -v $(pwd)/sonar_logs:/opt/sonarqube/logs \
   sonarqube:latest
-```
 
-
-### Install Kubernetes Tools
-
-Run this on your machine and on every node (master and workers). The version must match across all machines.
-
-```bash
-sudo apt update
-sudo apt install -y apt-transport-https ca-certificates curl
-
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-
-sudo apt update
-sudo apt install -y kubelet kubeadm kubectl
-sudo apt-mark hold kubelet kubeadm kubectl
-```
-
-Verify the installation:
-
-```bash
-kubeadm version
-kubectl version --client
-```
-
-## Architecture Overview
-
-```
-Developer
-   |
-   |  git push
-   v
-GitHub Repository
-   |
-   v
-Jenkins CI/CD
-   |  build docker image
-   v
-Docker Registry (DockerHub)
-   |
-   v
-Kubernetes Cluster (kubeadm)
-   |
-   v
-Pods (React + Node + MongoDB)
-```
-
-## Repository Structure
-
-```
-mern-app/
-|
-|-- frontend/
-|   |-- Dockerfile
-|   └── (React source code)
-|
-|-- backend/
-|   |-- Dockerfile
-|   └── (Node/Express source code)
-|
-|-- k8s/
-|   |-- frontend-deployment.yaml
-|   |-- backend-deployment.yaml
-|   └── mongo.yaml
-|
-└── Jenkinsfile
-```
-
----
-
-## Step 1 — Dockerize the Application
-
-### Backend Dockerfile (`backend/Dockerfile`)
-
-```dockerfile
-FROM node:18
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm install
-
-COPY . .
-
-EXPOSE 5000
-
-CMD ["npm", "start"]
-```
-
-### Frontend Dockerfile (`frontend/Dockerfile`)
-
-```dockerfile
-FROM node:18 as build
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm install
-
-COPY . .
-RUN npm run build
-
-FROM nginx:alpine
-COPY --from=build /app/build /usr/share/nginx/html
-
-EXPOSE 80
-```
-
----
-
-## Step 2 — Build and Test Docker Images Locally
-
-```bash
-# Build images
-docker build -t mern-backend ./backend
-docker build -t mern-frontend ./frontend
-
-# Run locally to test
-docker run -p 5000:5000 mern-backend
-docker run -p 3000:80 mern-frontend
-```
-
-## Step 3 — Push Images to DockerHub
-
-```bash
-# Login to DockerHub
-docker login
-
-# Tag images
-docker tag mern-backend <your-username>/mern-backend:latest
-docker tag mern-frontend <your-username>/mern-frontend:latest
-
-# Push images
-docker push <your-username>/mern-backend:latest
-docker push <your-username>/mern-frontend:latest
-```
-
-> Replace `<your-username>` with your DockerHub username throughout this project.
-
----
-
-## Step 4 — Kubernetes Deployment Files
-
-### Backend Deployment (`k8s/backend-deployment.yaml`)
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: backend
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: backend
-  template:
-    metadata:
-      labels:
-        app: backend
-    spec:
-      containers:
-      - name: backend
-        image: <your-username>/mern-backend:latest
-        ports:
-        - containerPort: 5000
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: backend-service
-spec:
-  type: ClusterIP
-  selector:
-    app: backend
-  ports:
-  - port: 5000
-    targetPort: 5000
-```
-
-### Frontend Deployment (`k8s/frontend-deployment.yaml`)
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: frontend
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: frontend
-  template:
-    metadata:
-      labels:
-        app: frontend
-    spec:
-      containers:
-      - name: frontend
-        image: <your-username>/mern-frontend:latest
-        ports:
-        - containerPort: 80
-```
-
----
-
-## Step 5 — Deploy to Kubernetes
-
-```bash
-# Add user to the Docker group
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Start Kubernetes (Minikube)
-minikube start --driver=docker
-
-# Apply all manifests
-kubectl apply -f k8s/
-
-# Verify pods are running
-kubectl get pods
-
-# Check services
-kubectl get svc
-```
-
-
-
-## Step 6 — Install Jenkins
-
-Run Jenkins in Docker:
-
-```bash
+# Start Jenkins with Docker socket mounted
 docker run -d \
   --name jenkins \
-  -p 8080:8080 \
-  -p 50000:50000 \
+  --network jenkins-net \
+  -p 8080:8080 -p 50000:50000 \
   -v jenkins_home:/var/jenkins_home \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   jenkins/jenkins:lts
 ```
 
-Check it is running:
+The Docker socket mount is required so Jenkins can run docker commands on the host.
+The shared network allows Jenkins to reach SonarQube by container name.
+
+### Install Docker and docker-compose inside Jenkins
 
 ```bash
-docker ps
+docker exec -it --user root jenkins bash
+
+apt-get update && apt-get install -y docker.io docker-compose
+
+docker --version
+docker-compose --version
+
+exit
 ```
 
-Get the initial admin password:
+### Fix Docker socket permissions
 
 ```bash
-docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+sudo chmod 666 /var/run/docker.sock
 ```
 
-Open Jenkins at **http://localhost:8080** and paste the password in when prompted.
+Or permanently via group membership:
 
-### Required Jenkins Plugins
-
-Install these from **Manage Jenkins -> Plugin Manager**:
-
-| Plugin | Purpose |
-|--------|---------|
-| Docker | Build and push Docker images |
-| Kubernetes | Deploy to Kubernetes cluster |
-| Git | Clone from GitHub |
-| Pipeline | Run Jenkinsfile pipelines |
+```bash
+docker exec -it --user root jenkins bash
+usermod -aG docker jenkins
+chmod 666 /var/run/docker.sock
+exit
+docker restart jenkins
+```
 
 ---
 
-## Step 7 — Connect Jenkins to GitHub
+## Stage 2 — Jenkins Configuration
 
-1. In Jenkins, click **New Item -> Pipeline**
-2. Under **Pipeline Definition**, select: `Pipeline script from SCM`
-3. Set SCM to **Git**
-4. Enter your repository URL:
-   ```
-   https://github.com/<your-username>/mern-app
-   ```
+### Required plugins
+
+Install from Manage Jenkins -> Plugins -> Available plugins:
+
+| Plugin               | Purpose                                        |
+|----------------------|------------------------------------------------|
+| NodeJS               | Auto-install Node.js and make npm available    |
+| SonarQube Scanner    | Run sonar-scanner without manual CLI install   |
+| Docker Pipeline      | Build and push Docker images                   |
+| Git                  | Clone from GitHub                              |
+| Pipeline             | Run Jenkinsfile pipelines                      |
+
+### Configure NodeJS tool
+
+Manage Jenkins -> Tools -> NodeJS installations -> Add NodeJS
+
+```
+Name:                  NodeJS-18
+Install automatically: yes
+Version:               18.x.x
+```
+
+The name must match the Jenkinsfile exactly:
+
+```groovy
+tools {
+    nodejs 'NodeJS-18'
+}
+```
+
+### Configure SonarQube Scanner tool
+
+Manage Jenkins -> Tools -> SonarQube Scanner installations -> Add SonarQube Scanner
+
+```
+Name:                  sonarqube
+Install automatically: yes
+Version:               SonarQube Scanner 8.x
+```
+
+### Configure SonarQube server
+
+Manage Jenkins -> System -> SonarQube servers
+
+Check the Environment variables checkbox, then add:
+
+```
+Name:       sonarqube
+Server URL: http://sonarqube:9000
+Token:      sonar-token
+```
+
+The URL must use the container name, not localhost. They are on the same Docker
+network so Jenkins resolves sonarqube by name.
+
+### Add credentials
+
+Manage Jenkins -> Credentials -> Global -> Add Credentials
+
+| ID           | Kind                  | Value                              |
+|--------------|-----------------------|------------------------------------|
+| dockerhub    | Username with password| DockerHub username + access token  |
+| sonar-token  | Secret text           | SonarQube user token               |
+
+GitHub credentials are not needed for a public repo.
+
+### Create a DockerHub access token
+
+DockerHub does not accept Gmail passwords for API access.
+A personal access token is required.
+
+1. Go to https://hub.docker.com/settings/security
+2. Click Personal access tokens -> Generate new token
+3. Name: jenkins, Permission: Read and Write
+4. Copy the token
+5. Paste it as the Password in the dockerhub Jenkins credential
 
 ---
 
-## Step 8 — Jenkinsfile (CI/CD Pipeline)
+## Stage 3 — Repository Structure
 
-Place this file at the root of the repo:
+```
+devops-pipeline-starter/
+|-- backend/
+|   |-- app.js              Express app exported without listen()
+|   |-- server.js           calls app.listen(), used by Docker
+|   |-- package.json
+|   `-- Dockerfile
+|-- frontend/
+|   |-- src/
+|   |-- package.json
+|   `-- Dockerfile
+|-- docker-compose.yml
+|-- sonar-project.properties
+`-- Jenkinsfile
+```
+
+### Why app.js and server.js are separate
+
+app.js exports the Express app without starting it.
+server.js imports it and calls app.listen().
+This pattern is required so tests can import the app without binding a port.
+Supertest starts its own server on a random port during tests.
+
+---
+
+## Stage 4 — Config Files
+
+### docker-compose.yml
+
+```yaml
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mern-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - mern-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mern-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+    networks:
+      - mern-net
+
+networks:
+  mern-net:
+    driver: bridge
+```
+
+### sonar-project.properties
+
+```properties
+sonar.projectKey=mern-app
+sonar.projectName=MERN App
+sonar.projectVersion=1.0
+sonar.sources=frontend/src,backend
+sonar.exclusions=**/node_modules/**,**/build/**,**/coverage/**
+sonar.sourceEncoding=UTF-8
+```
+
+### Jenkinsfile
 
 ```groovy
 pipeline {
     agent any
 
+    tools {
+        nodejs 'NodeJS-18'
+    }
+
+    environment {
+        DOCKERHUB_USER = 'ilyeschrif21'
+        IMAGE_BACKEND  = "${DOCKERHUB_USER}/mern-backend"
+        IMAGE_FRONTEND = "${DOCKERHUB_USER}/mern-frontend"
+    }
+
     stages {
 
-        stage('Clone Repo') {
+        stage('Clone Repository') {
             steps {
-                git 'https://github.com/<your-username>/mern-app.git'
+                git branch: 'main',
+                    url: 'https://github.com/Ilyeschrif22/devops-pipeline-starter.git'
             }
         }
 
-        stage('Build Docker Images') {
-            steps {
-                sh 'docker build -t <your-username>/mern-backend ./backend'
-                sh 'docker build -t <your-username>/mern-frontend ./frontend'
+        stage('Install Dependencies') {
+            parallel {
+                stage('Backend deps') {
+                    steps {
+                        dir('backend') { sh 'npm install' }
+                    }
+                }
+                stage('Frontend deps') {
+                    steps {
+                        dir('frontend') { sh 'npm install' }
+                    }
+                }
             }
         }
 
-        stage('Push Images') {
+        stage('SonarQube Analysis') {
             steps {
-                sh 'docker push <your-username>/mern-backend'
-                sh 'docker push <your-username>/mern-frontend'
+                withSonarQubeEnv('sonarqube') {
+                    sh "${tool 'sonarqube'}/bin/sonar-scanner"
+                }
+            }
+        }
+
+        stage('Docker Compose Build') {
+            steps {
+                sh 'docker-compose build'
+            }
+        }
+
+        stage('Push Images to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+
+                    sh "docker tag mern-pipeline-frontend ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
+                    sh "docker tag mern-pipeline-frontend ${IMAGE_FRONTEND}:latest"
+                    sh "docker tag mern-pipeline-backend  ${IMAGE_BACKEND}:${BUILD_NUMBER}"
+                    sh "docker tag mern-pipeline-backend  ${IMAGE_BACKEND}:latest"
+
+                    sh "docker push ${IMAGE_FRONTEND}:${BUILD_NUMBER}"
+                    sh "docker push ${IMAGE_FRONTEND}:latest"
+                    sh "docker push ${IMAGE_BACKEND}:${BUILD_NUMBER}"
+                    sh "docker push ${IMAGE_BACKEND}:latest"
+                }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
                 sh 'kubectl apply -f k8s/'
+                sh 'kubectl rollout restart deployment/backend'
+                sh 'kubectl rollout restart deployment/frontend'
             }
         }
 
+    }
+
+    post {
+        always  { echo 'Pipeline finished.' }
+        success { echo 'All stages passed. Deployment complete.' }
+        failure { echo 'Pipeline failed — check the stage logs above.' }
     }
 }
 ```
 
 ---
 
-## Full CI/CD Flow Summary
+## Errors Encountered and Fixes
 
-```
-Developer pushes code
-        |
-        v
-      GitHub
-        |
-        v
-      Jenkins
-        |
-  Build Docker Images
-        |
-  Push to DockerHub
-        |
-  Deploy to Kubernetes
-        |
-  Pods Updated Automatically
+### Wrong repo name in Jenkins config
+
+Cause: Jenkins pipeline config and Jenkinsfile pointed to
+jenkins-sonarqube-pipeline-starter but the actual repo was devops-pipeline-starter.
+
+Fix: Update the Repository URL in both Jenkins pipeline config and the Jenkinsfile
+to match the actual repo name.
+
+---
+
+### npm: not found
+
+Cause: Node.js was not installed in the Jenkins container.
+
+Fix: Install the NodeJS plugin and configure it in Manage Jenkins -> Tools.
+Add the tools block to the Jenkinsfile:
+
+```groovy
+tools {
+    nodejs 'NodeJS-18'
+}
 ```
 
 ---
 
-## What This Project Demonstrates
+### npm ci fails — no package-lock.json
 
-| Technology | Role |
-|------------|------|
-| GitHub | Version control and source of truth |
-| Jenkins | CI/CD automation pipeline |
-| Docker | Containerization of services |
-| DockerHub | Container image registry |
-| Kubernetes | Container orchestration and scaling |
+Cause: npm ci requires a lockfile. None existed in the repo.
+
+Fix: Changed npm ci to npm install in the Jenkinsfile. Works without a lockfile.
 
 ---
 
-## Setting Up the Kubernetes Cluster (Master and Workers)
+### no such file or directory: backend/package.json
 
-Follow these steps on all machines first, then initialize the master and join the workers.
+Cause: backend/ and frontend/ folders did not exist at the repo root.
+They were nested inside a subfolder.
 
-### Requirements
-
-- At least 2 CPUs and 2GB RAM per machine
-- All machines on the same network and able to ping each other
-- Ubuntu or compatible Linux distro on all nodes
+Fix: Move both folders to the root of the repo and push.
 
 ---
 
-### On All Machines (Master and Workers)
+### Tool type nodejs does not have an install of NodeJS-18 configured
 
-**1. Disable swap — kubeadm requires this**
+Cause: The name in Manage Jenkins -> Tools did not match the Jenkinsfile.
 
-```bash
-sudo swapoff -a
-sudo sed -i '/ swap / s/^/#/' /etc/fstab
-```
-
-**2. Open required ports on all machines**
-
-| Port | Purpose |
-|------|---------|
-| 6443 | Kubernetes API server |
-| 2379-2380 | etcd |
-| 10250 | kubelet |
-| 10251 | kube-scheduler |
-| 10252 | kube-controller-manager |
-| 30000-32767 | NodePort services |
-
-```bash
-sudo ufw allow 6443
-sudo ufw allow 2379:2380/tcp
-sudo ufw allow 10250
-sudo ufw allow 10251
-sudo ufw allow 10252
-sudo ufw allow 30000:32767/tcp
-```
-
-> If your friends are on a different distro (CentOS, Fedora), replace `ufw` with `firewall-cmd` or `iptables` commands.
-
-**3. Install containerd (container runtime)**
-
-```bash
-sudo apt update
-sudo apt install -y containerd
-sudo mkdir -p /etc/containerd
-containerd config default | sudo tee /etc/containerd/config.toml
-sudo systemctl restart containerd
-sudo systemctl enable containerd
-```
-
-**4. Install kubeadm, kubelet, and kubectl**
-
-Pin the version so all machines match — this example uses v1.29:
-
-```bash
-sudo apt update
-sudo apt install -y apt-transport-https ca-certificates curl
-
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-
-sudo apt update
-sudo apt install -y kubelet=1.29.0-1.1 kubeadm=1.29.0-1.1 kubectl=1.29.0-1.1
-sudo apt-mark hold kubelet kubeadm kubectl
-```
-
-> All machines must install the exact same version. Using `apt-mark hold` prevents accidental upgrades.
+Fix: Either rename the tool in Jenkins Tools to NodeJS-18 or update the
+Jenkinsfile to use whatever name was configured. They must match exactly,
+including capitalisation.
 
 ---
 
-### On the Master Node Only
+### sonar-scanner: not found
 
-**5. Initialize the cluster**
+Cause: The SonarQube Scanner CLI was not installed in the Jenkins container.
+The SonarQube Scanner for Jenkins plugin was installed but not the CLI tool.
 
-```bash
-sudo kubeadm init --pod-network-cidr=192.168.0.0/16
-```
+Fix: Use withSonarQubeEnv and the tool() function so Jenkins downloads and
+manages the scanner automatically:
 
-**6. Set up kubectl access**
-
-```bash
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-```
-
-**7. Install a pod network (Calico)**
-
-```bash
-kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-```
-
-**8. Get the join command**
-
-At the end of `kubeadm init` you will see a join command. Copy it — it looks like this:
-
-```bash
-kubeadm join <master-ip>:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>
-```
-
-If you lose it, regenerate it on the master:
-
-```bash
-kubeadm token create --print-join-command
+```groovy
+withSonarQubeEnv('sonarqube') {
+    sh "${tool 'sonarqube'}/bin/sonar-scanner"
+}
 ```
 
 ---
 
-### On Each Worker Node
+### Failed to query server version — null
 
-**9. Join the cluster**
+Cause: Jenkins was on the bridge network while SonarQube was on jenkins-net.
+They could not reach each other by container name.
 
-Run the join command from the previous step on each worker machine:
+Fix:
 
 ```bash
-sudo kubeadm join <master-ip>:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>
+docker network connect jenkins-net jenkins
+docker exec jenkins curl http://sonarqube:9000
 ```
 
 ---
 
-### Verify the Cluster
+### SonarQube server name was docker ps -a
 
-Back on the master, check that all nodes are connected:
+Cause: The Name field in Manage Jenkins -> System -> SonarQube servers was
+accidentally set to a shell command instead of a name.
 
-```bash
-kubectl get nodes
-```
-
-You should see the master and all workers listed with a status of `Ready`. This may take a minute or two after joining.
+Fix: Set Name to sonarqube and Server URL to http://sonarqube:9000.
 
 ---
 
-## Prerequisites
+### You must define sonar.projectKey
 
-- Docker installed locally
-- DockerHub account
-- Kubernetes cluster (kubeadm, Minikube, or cloud provider)
-- kubectl configured and pointing to your cluster
-- Jenkins running (locally or on a server)
-- GitHub account with the repo pushed
+Cause: sonar-project.properties was missing from the repo root.
+
+Fix: Add the file to the repo root with at minimum:
+
+```properties
+sonar.projectKey=mern-app
+sonar.sources=frontend/src,backend
+```
 
 ---
 
-## Troubleshooting
+### docker: not found inside Jenkins
 
-**Pods not starting?**
+Cause: Jenkins container was started without the Docker socket mounted and
+without docker installed inside.
+
+Fix: Recreate Jenkins with the socket mounted and install docker inside:
+
 ```bash
-kubectl describe pod <pod-name>
-kubectl logs <pod-name>
-```
+docker stop jenkins && docker rm jenkins
 
-**Jenkins cannot connect to Docker?**
-```bash
-# Add Jenkins user to Docker group
-sudo usermod -aG docker jenkins
-sudo systemctl restart jenkins
-```
+docker run -d \
+  --name jenkins \
+  --network jenkins-net \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  jenkins/jenkins:lts
 
-**kubectl not found in Jenkins?**
-- Make sure kubectl is installed on the Jenkins agent machine
-- Configure the Kubernetes plugin with your cluster credentials
+docker exec -it --user root jenkins bash
+apt-get update && apt-get install -y docker.io
+exit
+
+sudo chmod 666 /var/run/docker.sock
+```
 
 ---
 
-*This is a student DevOps project demonstrating a complete containerized microservice deployment pipeline.*
+### docker: compose is not a docker command
+
+Cause: The docker.io package installed inside Jenkins was an older version
+that does not include the compose subcommand (V2).
+
+Fix: Install docker-compose (V1) separately:
+
+```bash
+docker exec -it --user root jenkins bash
+apt-get install -y docker-compose
+exit
+```
+
+Then use docker-compose build instead of docker compose build in the Jenkinsfile.
+
+---
+
+### No such property: DOCKER_CREDS_PSW
+
+Cause: Using credentials() in the environment block does not reliably expose
+_PSW and _USR suffixes in all Jenkins versions.
+
+Fix: Use withCredentials with usernamePassword binding in the stage instead:
+
+```groovy
+withCredentials([usernamePassword(
+    credentialsId: 'dockerhub',
+    usernameVariable: 'DOCKER_USER',
+    passwordVariable: 'DOCKER_PASS'
+)]) {
+    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+}
+```
+
+---
+
+### No such image: mern-frontend:latest
+
+Cause: docker-compose prefixes built image names with the workspace folder name.
+The workspace was mern-pipeline so images were named mern-pipeline-frontend
+and mern-pipeline-backend, not mern-frontend.
+
+Fix: Use the correct prefixed names in the tag commands:
+
+```groovy
+sh "docker tag mern-pipeline-frontend ${IMAGE_FRONTEND}:latest"
+sh "docker tag mern-pipeline-backend  ${IMAGE_BACKEND}:latest"
+```
+
+---
+
+### DockerHub login fails — Gmail password not accepted
+
+Cause: DockerHub does not accept account passwords for API/CLI authentication.
+A personal access token is required.
+
+Fix:
+1. Go to https://hub.docker.com/settings/security
+2. Generate a new access token with Read and Write permission
+3. Use the token as the password in the dockerhub Jenkins credential
+
+---
+
+## Stage Progress
+
+| Stage                  | Status  | Main issue encountered                        |
+|------------------------|---------|-----------------------------------------------|
+| Clone Repository       | DONE    | Wrong repo name in URL                        |
+| Install Dependencies   | DONE    | npm not found, npm ci without lockfile        |
+| SonarQube Analysis     | DONE    | Scanner not found, wrong network, missing key |
+| Docker Compose Build   | DONE    | docker not found, compose V1 vs V2            |
+| Push Images to DockerHub| DONE   | Bad credentials binding, wrong image names    |
+| Deploy to Kubernetes   | pending |                                               |
+
+---
+
+## Next Step — Kubernetes Deploy
+
+For the Deploy to Kubernetes stage to work, kubectl must be installed inside
+Jenkins and configured to point at your cluster.
+
+```bash
+docker exec -it --user root jenkins bash
+
+apt-get install -y kubectl
+
+# Copy kubeconfig from your machine into the container
+exit
+
+docker cp ~/.kube/config jenkins:/var/jenkins_home/.kube/config
+```
+
+---
+
+*Student DevOps project — MERN stack CI/CD pipeline with Jenkins, SonarQube, Docker, and Kubernetes.*
