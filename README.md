@@ -9,7 +9,7 @@
 <img width="1343" alt="docker ps showing all containers running" src="https://github.com/user-attachments/assets/429d9f51-7683-4923-8842-d03ef2e765a6" />
 
 ### Kubernetes Pods Running
-<img width="982" alt="kubectl get pods" src="https://github.com/user-attachments/assets/b5edbb02-7d13-4364-8a11-102892134c2a" />
+<img width="1343" height="89" alt="image" src="https://github.com/user-attachments/assets/23b34594-10a3-4b71-bb52-c45b758a4192" />
 
 
 ## Before Every Build — Startup Checklist
