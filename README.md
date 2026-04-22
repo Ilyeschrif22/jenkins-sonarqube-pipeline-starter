@@ -1,4 +1,4 @@
-# MERN CI/CD Pipeline — Full Setup & Troubleshooting Journal
+# MERN CI/CD Pipeline: Setup, Deployment and Troubleshooting
 
 ## Pipeline Results
 
